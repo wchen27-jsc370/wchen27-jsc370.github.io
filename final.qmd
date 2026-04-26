@@ -7,6 +7,7 @@ execute:
 format:
   html:
     toc: true
+    output-file: index
     code-overflow: wrap
   pdf:
     toc: false
@@ -235,9 +236,9 @@ The analysis uses three sources: TTC bus delay records, City of Toronto parking 
 
 TTC incidents were cleaned by standardizing column names, parsing dates, coercing delay minutes to numeric, and restricting the data to 2024. Parking tickets were aggregated to daily ticket counts. I combined these daily ticket measures into a driver activity proxy using a weighted standardized average of log ticket volume and infraction diversity. Weather data were requested for Toronto coordinates and reduced to daily temperature, precipitation, snowfall, and windspeed measures.
 
-These sources were first merged into a daily table with `{python} int(n_days)` days for descriptive analysis. For prediction, TTC incidents were then aggregated to a **route-day** panel with `{python} int(n_route_days)` rows across `{python} int(n_routes)` routes. A route-day was labeled **high delay** if total delay minutes were in the top quartile of the route-day distribution, giving a positive-class rate of `{python} f"{100 * high_delay_rate:.1f}%"`. Because the route-day panel is built from recorded delay incidents, it does not include zero-delay route-days.
+These sources were first merged into a daily table with `{python} int(n_days)` days for descriptive analysis. For prediction, TTC incidents were then aggregated to a **route-day** panel with `{python} int(n_route_days)` rows across `{python} int(n_routes)` routes. A route-day was labeled **high delay** if total delay minutes were in the top quartile of the route-day distribution, giving a positive class rate of `{python} f"{100 * high_delay_rate:.1f}%"`. Because the route day panel is built from recorded delay incidents, it does not include zero delay route-days.
 
-I fit three baseline models using an 80/20 train-test split: a Random Forest classifier for the binary high-delay outcome, an OLS regression for continuous delay minutes, and an XGBoost regressor for nonlinear prediction. The classifier used `n_estimators = 100`; XGBoost used `n_estimators = 100` and `learning_rate = 0.1`. Evaluation metrics were accuracy, weighted precision/recall/F1, positive-class precision/recall/F1, mean squared error, and mean absolute error. Interactive Plotly visualizations are provided on the website rather than in the PDF.
+I fit three baseline models using an 80/20 train test split: a Random Forest classifier for the binary high-delay outcome, an OLS regression for continuous delay minutes, and an XGBoost regressor for nonlinear prediction. The classifier used `n_estimators = 100`; XGBoost used `n_estimators = 100` and `learning_rate = 0.1`. Evaluation metrics were accuracy, weighted precision/recall/F1, positive class precision/recall/F1, mean squared error, and mean absolute error. Interactive Plotly visualizations are provided on the website rather than in the PDF.
 
 ## Table 1. Descriptive statistics for daily TTC, parking, and weather measures
 
@@ -257,10 +258,10 @@ summary_table.style.format(
 Table 1 gives us direct insight into the statistical scale and variability of each daily measure modeled. In particular, it highlights the spread in delay burden (comparing median `bus_delay_events` and `total_min_delay` against outliers located at the `max`), while also showing the volatile daily variance of our weighted driver activity proxy.
 
 ```{python}
-#| fig-cap: "Daily total TTC bus delay minutes across 2024, with a 7-day moving average."
+#| fig-cap: "Daily total TTC bus delay minutes across 2024, with a 7 day moving average."
 fig, ax = plt.subplots(figsize=(8.5, 3.8))
 ax.plot(ttc_daily["date"], ttc_daily["total_min_delay"], alpha=0.35, label="Daily")
-ax.plot(ttc_daily["date"], ttc_daily["delay_7d_ma"], linewidth=2, label="7-day moving average")
+ax.plot(ttc_daily["date"], ttc_daily["delay_7d_ma"], linewidth=2, label="7 day moving average")
 ax.set_xlabel("Date")
 ax.set_ylabel("Total delay minutes")
 ax.legend(frameon=False)
@@ -268,30 +269,30 @@ plt.tight_layout()
 plt.show()
 ```
 
-The daily series shows substantial volatility throughout the year, with repeated short-lived spikes rather than a single isolated disruption period. This supports treating TTC delay burden as a highly variable outcome even before route-level modeling.
+The daily series shows substantial volatility throughout the year, with repeated short lived spikes rather than a single isolated disruption period. This supports treating TTC delay burden as a highly variable outcome even before route level modeling.
 
 # Results
 ## Classification: Random Forest
 
-**Model Description:** We deploy a Random Forest Classifier to identify high-delay route-days. A Random Forest is an ensemble learning method that constructs a multitude of decision trees and outputs the mode of the classes, effectively capturing complex, non-linear relationships between independent features (weather, traffic volume proxy, route) and the delay likelihood.
+**Model Description:** We deploy a Random Forest Classifier to identify high-delay route-days. A Random Forest is an ensemble learning method that constructs a multitude of decision trees and outputs the mode of the classes, effectively capturing complex, nonlinear relationships between independent features (weather, traffic volume proxy, route) and the delay likelihood.
 
 **Data Split Strategy:** The route-day dataset is partitioned into an 80% training set and a 20% test set (`test_size=0.2`). We utilize stratified sampling (`stratify=y`) based on the binary `high_delay` target to ensure proportional representation of severe delays across both sets, keeping a fixed random state for reproducibility. No separate validation set is used for this baseline implementation.
 
 **Hyperparameters:** The model is initialized with `n_estimators=100` (building 100 individual decision trees) while locking the random state. All other hyperparameters are left at scikit-learn defaults (e.g., Gini impurity criterion, unbounded max depth).
 
-**Test Statistics:** The model is evaluated on the 20% holdout test set utilizing overall Accuracy, along with weighted Precision, Recall, and F1-Score metrics to account for class imbalances when evaluating the model's exactness and completeness.
+**Test Statistics:** The model is evaluated on the 20% holdout test set utilizing overall Accuracy, along with weighted Precision, Recall, and F1 Score metrics to account for class imbalances when evaluating the model's exactness and completeness.
 
 ## Regression: OLS Baseline and XGBoost
 
 We pivot to regression approaches to directly forecast the exact continuous duration of daily delay minutes per route. Both algorithms employ an 80% training and 20% holdout test set split randomly (`test_size=0.2, random_state=370`). Stratification is not applied here since the target (`total_delay_mins`) is continuous.
 
 ### 1. Ordinary Least Squares (OLS) Baseline
-*   **Model Description:** A foundational multiple linear regression model that maps the direct linear combination of inputs to continuous route-day delays. It serves as a highly interpretable naive baseline providing analytical $p$-values and coefficient estimates.
+*   **Model Description:** A foundational multiple linear regression model that maps the direct linear combination of inputs to continuous route-day delays. It serves as a highly interpretable naive baseline providing analytical $p$ values and coefficient estimates.
 *   **Hyperparameters:** None. The model fits optimal coefficients to minimize the residual sum of squares. An intercept constant is added analytically before training via `sm.add_constant`.
 *   **Test Statistics:** Evaluated utilizing Mean Squared Error (MSE) and Mean Absolute Error (MAE) measured against the 20% holdout test set.
 
 ### 2. XGBoost Regressor
-*   **Model Description:** Extreme Gradient Boosting sequentially builds decision trees designed to correct the residual error margins of its preceding trees. It is robust to outliers and well-equipped for modeling the highly right-skewed tail distributions prevalent in our continuous delay targets without requiring normalization.
+*   **Model Description:** Extreme Gradient Boosting sequentially builds decision trees designed to correct the residual error margins of its preceding trees. It is robust to outliers and well equipped for modeling the highly right skewed tail distributions prevalent in our continuous delay targets without requiring normalization.
 *   **Hyperparameters:** Configured with `n_estimators=100` (100 boosting rounds/trees) and `learning_rate=0.1` (step size shrinkage) to prevent overfitting, anchored strictly to a fixed random state. 
 *   **Test Statistics:** Analyzed identically via test MSE and MAE to formally benchmark predictive performance uplift versus the linear parametric equation mapping context.
 
@@ -354,7 +355,7 @@ The regression scatterplots show that both models predict moderate delays more a
 coef_table.style.format({"coef": "{:.3f}", "std_err": "{:.3f}", "p_value": "{:.4f}"}).hide(axis="index")
 ```
 
-The OLS model provides some inferential support for the project hypotheses. Snowfall, higher windspeed, and greater ticket volume all have positive coefficients with p-values below 0.01, while temperature and precipitation are not statistically significant in this linear specification.
+The OLS model provides some inferential support for the project hypotheses. Snowfall, higher windspeed, and greater ticket volume all have positive coefficients with p values below 0.01, while temperature and precipitation are not statistically significant in this linear specification.
 
 ```{python}
 #| fig-cap: "Feature importance from the Random Forest classifier and XGBoost regressor."
@@ -392,9 +393,9 @@ When translated into predictive models, our empirical results support these init
 
 ## Model Limitations
 
-Despite validating these directional relationships, forecasting exact delay parameters proved difficult, as evidenced by large margin errors (MAE around 36 minutes) and a low positive-class Recall rate (~25%) in predicting extreme delays. This outcome highlights critical limitations within our current methodology:
+Despite validating these directional relationships, forecasting exact delay parameters proved difficult, as evidenced by large margin errors (MAE around 36 minutes) and a low positive class Recall rate (~25%) in predicting extreme delays. This outcome highlights critical limitations within our current methodology:
 
-1. **Resolution Mismatch:** Our weather statistics operate on a broad, city-wide resolution (retrieved for central Toronto coordinates), yet bus delays and weather events (like localized squalls or icy hills) operate on highly localized spatial levels.
-2. **Imperfect Proxies:** While daily parking ticket volume provides a clever proxy for overall driver presence and law enforcement activity, it is not a one-to-one mapping for real-time vehicular traffic density or localized congestion along specific bus corridors.  3. **Omitted Operational Variables:** The models lack access to internal TTC operational data. Critical unobserved factors—such as localized road construction, sudden mechanical bus failures, operator absenteeism, and scheduled route frequencies—are likely generating the massive residual variance our models struggle to capture. 
+1. **Resolution Mismatch:** Our weather statistics operate on a broad, citywide resolution (retrieved for central Toronto coordinates), yet bus delays and weather events (like localized squalls or icy hills) operate on highly localized spatial levels.
+2. **Imperfect Proxies:** While daily parking ticket volume provides a clever proxy for overall driver presence and law enforcement activity, it is not a one to one mapping for realtime vehicular traffic density or localized congestion along specific bus corridors.  3. **Omitted Operational Variables:** The models lack access to internal TTC operational data. Critical unobserved factors, such as localized road construction, sudden mechanical bus failures, operator absenteeism, and scheduled route frequencies, are likely generating the massive residual variance our models struggle to capture. 
 
 Ultimately, while macro variables like a snowstorm or general citywide traffic volume clearly shift the baseline probability of systemic delays, accurately predicting the exact minutes lost requires a more localized, granular operational dataset.

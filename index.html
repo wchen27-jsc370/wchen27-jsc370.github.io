@@ -137,117 +137,117 @@ window.Quarto = {
 <h1>Methods</h1>
 <p>The analysis uses three sources: TTC bus delay records, City of Toronto parking ticket records, and daily Toronto weather from the Open-Meteo Archive API. The raw inputs contain 59643 TTC delay records and 2147159 parking records drawn from 12 parking files. Parking tickets are used as a proxy for citywide street activity rather than a direct measure of congestion.</p>
 <p>TTC incidents were cleaned by standardizing column names, parsing dates, coercing delay minutes to numeric, and restricting the data to 2024. Parking tickets were aggregated to daily ticket counts. I combined these daily ticket measures into a driver activity proxy using a weighted standardized average of log ticket volume and infraction diversity. Weather data were requested for Toronto coordinates and reduced to daily temperature, precipitation, snowfall, and windspeed measures.</p>
-<p>These sources were first merged into a daily table with 366 days for descriptive analysis. For prediction, TTC incidents were then aggregated to a <strong>route-day</strong> panel with 29803 rows across 264 routes. A route-day was labeled <strong>high delay</strong> if total delay minutes were in the top quartile of the route-day distribution, giving a positive-class rate of 25.6%. Because the route-day panel is built from recorded delay incidents, it does not include zero-delay route-days.</p>
-<p>I fit three baseline models using an 80/20 train-test split: a Random Forest classifier for the binary high-delay outcome, an OLS regression for continuous delay minutes, and an XGBoost regressor for nonlinear prediction. The classifier used <code>n_estimators = 100</code>; XGBoost used <code>n_estimators = 100</code> and <code>learning_rate = 0.1</code>. Evaluation metrics were accuracy, weighted precision/recall/F1, positive-class precision/recall/F1, mean squared error, and mean absolute error. Interactive Plotly visualizations are provided on the website rather than in the PDF.</p>
+<p>These sources were first merged into a daily table with 366 days for descriptive analysis. For prediction, TTC incidents were then aggregated to a <strong>route-day</strong> panel with 29803 rows across 264 routes. A route-day was labeled <strong>high delay</strong> if total delay minutes were in the top quartile of the route-day distribution, giving a positive class rate of 25.6%. Because the route day panel is built from recorded delay incidents, it does not include zero delay route-days.</p>
+<p>I fit three baseline models using an 80/20 train test split: a Random Forest classifier for the binary high-delay outcome, an OLS regression for continuous delay minutes, and an XGBoost regressor for nonlinear prediction. The classifier used <code>n_estimators = 100</code>; XGBoost used <code>n_estimators = 100</code> and <code>learning_rate = 0.1</code>. Evaluation metrics were accuracy, weighted precision/recall/F1, positive class precision/recall/F1, mean squared error, and mean absolute error. Interactive Plotly visualizations are provided on the website rather than in the PDF.</p>
 <section id="table-1.-descriptive-statistics-for-daily-ttc-parking-and-weather-measures" class="level2">
 <h2 class="anchored" data-anchor-id="table-1.-descriptive-statistics-for-daily-ttc-parking-and-weather-measures">Table 1. Descriptive statistics for daily TTC, parking, and weather measures</h2>
-<div id="682d13b0" class="cell" data-execution_count="2">
-<div class="cell-output cell-output-display" data-execution_count="16">
+<div id="07d6d450" class="cell" data-execution_count="2">
+<div class="cell-output cell-output-display" data-execution_count="2">
 <style type="text/css">
 </style>
 
-<table id="T_86ade" class="caption-top table table-sm table-striped small">
+<table id="T_ff456" class="caption-top table table-sm table-striped small">
 <thead>
 <tr class="header">
-<th id="T_86ade_level0_col0" class="col_heading level0 col0" data-quarto-table-cell-role="th">Variable</th>
-<th id="T_86ade_level0_col1" class="col_heading level0 col1" data-quarto-table-cell-role="th">count</th>
-<th id="T_86ade_level0_col2" class="col_heading level0 col2" data-quarto-table-cell-role="th">mean</th>
-<th id="T_86ade_level0_col3" class="col_heading level0 col3" data-quarto-table-cell-role="th">SD</th>
-<th id="T_86ade_level0_col4" class="col_heading level0 col4" data-quarto-table-cell-role="th">min</th>
-<th id="T_86ade_level0_col5" class="col_heading level0 col5" data-quarto-table-cell-role="th">median</th>
-<th id="T_86ade_level0_col6" class="col_heading level0 col6" data-quarto-table-cell-role="th">max</th>
+<th id="T_ff456_level0_col0" class="col_heading level0 col0" data-quarto-table-cell-role="th">Variable</th>
+<th id="T_ff456_level0_col1" class="col_heading level0 col1" data-quarto-table-cell-role="th">count</th>
+<th id="T_ff456_level0_col2" class="col_heading level0 col2" data-quarto-table-cell-role="th">mean</th>
+<th id="T_ff456_level0_col3" class="col_heading level0 col3" data-quarto-table-cell-role="th">SD</th>
+<th id="T_ff456_level0_col4" class="col_heading level0 col4" data-quarto-table-cell-role="th">min</th>
+<th id="T_ff456_level0_col5" class="col_heading level0 col5" data-quarto-table-cell-role="th">median</th>
+<th id="T_ff456_level0_col6" class="col_heading level0 col6" data-quarto-table-cell-role="th">max</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td id="T_86ade_row0_col0" class="data row0 col0">bus_delay_events</td>
-<td id="T_86ade_row0_col1" class="data row0 col1">366</td>
-<td id="T_86ade_row0_col2" class="data row0 col2">162.96</td>
-<td id="T_86ade_row0_col3" class="data row0 col3">36.51</td>
-<td id="T_86ade_row0_col4" class="data row0 col4">60.00</td>
-<td id="T_86ade_row0_col5" class="data row0 col5">163.00</td>
-<td id="T_86ade_row0_col6" class="data row0 col6">279.00</td>
+<td id="T_ff456_row0_col0" class="data row0 col0">bus_delay_events</td>
+<td id="T_ff456_row0_col1" class="data row0 col1">366</td>
+<td id="T_ff456_row0_col2" class="data row0 col2">162.96</td>
+<td id="T_ff456_row0_col3" class="data row0 col3">36.51</td>
+<td id="T_ff456_row0_col4" class="data row0 col4">60.00</td>
+<td id="T_ff456_row0_col5" class="data row0 col5">163.00</td>
+<td id="T_ff456_row0_col6" class="data row0 col6">279.00</td>
 </tr>
 <tr class="even">
-<td id="T_86ade_row1_col0" class="data row1 col0">total_min_delay</td>
-<td id="T_86ade_row1_col1" class="data row1 col1">366</td>
-<td id="T_86ade_row1_col2" class="data row1 col2">3,457.73</td>
-<td id="T_86ade_row1_col3" class="data row1 col3">1,336.20</td>
-<td id="T_86ade_row1_col4" class="data row1 col4">1,018.00</td>
-<td id="T_86ade_row1_col5" class="data row1 col5">3,183.50</td>
-<td id="T_86ade_row1_col6" class="data row1 col6">10,435.00</td>
+<td id="T_ff456_row1_col0" class="data row1 col0">total_min_delay</td>
+<td id="T_ff456_row1_col1" class="data row1 col1">366</td>
+<td id="T_ff456_row1_col2" class="data row1 col2">3,457.73</td>
+<td id="T_ff456_row1_col3" class="data row1 col3">1,336.20</td>
+<td id="T_ff456_row1_col4" class="data row1 col4">1,018.00</td>
+<td id="T_ff456_row1_col5" class="data row1 col5">3,183.50</td>
+<td id="T_ff456_row1_col6" class="data row1 col6">10,435.00</td>
 </tr>
 <tr class="odd">
-<td id="T_86ade_row2_col0" class="data row2 col0">tickets_issued</td>
-<td id="T_86ade_row2_col1" class="data row2 col1">366</td>
-<td id="T_86ade_row2_col2" class="data row2 col2">5,866.55</td>
-<td id="T_86ade_row2_col3" class="data row2 col3">1,248.09</td>
-<td id="T_86ade_row2_col4" class="data row2 col4">1,367.00</td>
-<td id="T_86ade_row2_col5" class="data row2 col5">5,977.00</td>
-<td id="T_86ade_row2_col6" class="data row2 col6">8,696.00</td>
+<td id="T_ff456_row2_col0" class="data row2 col0">tickets_issued</td>
+<td id="T_ff456_row2_col1" class="data row2 col1">366</td>
+<td id="T_ff456_row2_col2" class="data row2 col2">5,866.55</td>
+<td id="T_ff456_row2_col3" class="data row2 col3">1,248.09</td>
+<td id="T_ff456_row2_col4" class="data row2 col4">1,367.00</td>
+<td id="T_ff456_row2_col5" class="data row2 col5">5,977.00</td>
+<td id="T_ff456_row2_col6" class="data row2 col6">8,696.00</td>
 </tr>
 <tr class="even">
-<td id="T_86ade_row3_col0" class="data row3 col0">driver_activity_proxy</td>
-<td id="T_86ade_row3_col1" class="data row3 col1">366</td>
-<td id="T_86ade_row3_col2" class="data row3 col2">-0.00</td>
-<td id="T_86ade_row3_col3" class="data row3 col3">0.96</td>
-<td id="T_86ade_row3_col4" class="data row3 col4">-4.94</td>
-<td id="T_86ade_row3_col5" class="data row3 col5">0.20</td>
-<td id="T_86ade_row3_col6" class="data row3 col6">1.62</td>
+<td id="T_ff456_row3_col0" class="data row3 col0">driver_activity_proxy</td>
+<td id="T_ff456_row3_col1" class="data row3 col1">366</td>
+<td id="T_ff456_row3_col2" class="data row3 col2">-0.00</td>
+<td id="T_ff456_row3_col3" class="data row3 col3">0.96</td>
+<td id="T_ff456_row3_col4" class="data row3 col4">-4.94</td>
+<td id="T_ff456_row3_col5" class="data row3 col5">0.20</td>
+<td id="T_ff456_row3_col6" class="data row3 col6">1.62</td>
 </tr>
 <tr class="odd">
-<td id="T_86ade_row4_col0" class="data row4 col0">precipitation_sum</td>
-<td id="T_86ade_row4_col1" class="data row4 col1">366</td>
-<td id="T_86ade_row4_col2" class="data row4 col2">2.60</td>
-<td id="T_86ade_row4_col3" class="data row4 col3">5.55</td>
-<td id="T_86ade_row4_col4" class="data row4 col4">0.00</td>
-<td id="T_86ade_row4_col5" class="data row4 col5">0.30</td>
-<td id="T_86ade_row4_col6" class="data row4 col6">44.80</td>
+<td id="T_ff456_row4_col0" class="data row4 col0">precipitation_sum</td>
+<td id="T_ff456_row4_col1" class="data row4 col1">366</td>
+<td id="T_ff456_row4_col2" class="data row4 col2">2.60</td>
+<td id="T_ff456_row4_col3" class="data row4 col3">5.55</td>
+<td id="T_ff456_row4_col4" class="data row4 col4">0.00</td>
+<td id="T_ff456_row4_col5" class="data row4 col5">0.30</td>
+<td id="T_ff456_row4_col6" class="data row4 col6">44.80</td>
 </tr>
 <tr class="even">
-<td id="T_86ade_row5_col0" class="data row5 col0">snowfall_sum</td>
-<td id="T_86ade_row5_col1" class="data row5 col1">366</td>
-<td id="T_86ade_row5_col2" class="data row5 col2">0.16</td>
-<td id="T_86ade_row5_col3" class="data row5 col3">0.73</td>
-<td id="T_86ade_row5_col4" class="data row5 col4">0.00</td>
-<td id="T_86ade_row5_col5" class="data row5 col5">0.00</td>
-<td id="T_86ade_row5_col6" class="data row5 col6">8.68</td>
+<td id="T_ff456_row5_col0" class="data row5 col0">snowfall_sum</td>
+<td id="T_ff456_row5_col1" class="data row5 col1">366</td>
+<td id="T_ff456_row5_col2" class="data row5 col2">0.16</td>
+<td id="T_ff456_row5_col3" class="data row5 col3">0.73</td>
+<td id="T_ff456_row5_col4" class="data row5 col4">0.00</td>
+<td id="T_ff456_row5_col5" class="data row5 col5">0.00</td>
+<td id="T_ff456_row5_col6" class="data row5 col6">8.68</td>
 </tr>
 <tr class="odd">
-<td id="T_86ade_row6_col0" class="data row6 col0">windspeed_10m_max</td>
-<td id="T_86ade_row6_col1" class="data row6 col1">366</td>
-<td id="T_86ade_row6_col2" class="data row6 col2">20.39</td>
-<td id="T_86ade_row6_col3" class="data row6 col3">6.54</td>
-<td id="T_86ade_row6_col4" class="data row6 col4">9.20</td>
-<td id="T_86ade_row6_col5" class="data row6 col5">19.80</td>
-<td id="T_86ade_row6_col6" class="data row6 col6">42.40</td>
+<td id="T_ff456_row6_col0" class="data row6 col0">windspeed_10m_max</td>
+<td id="T_ff456_row6_col1" class="data row6 col1">366</td>
+<td id="T_ff456_row6_col2" class="data row6 col2">20.39</td>
+<td id="T_ff456_row6_col3" class="data row6 col3">6.54</td>
+<td id="T_ff456_row6_col4" class="data row6 col4">9.20</td>
+<td id="T_ff456_row6_col5" class="data row6 col5">19.80</td>
+<td id="T_ff456_row6_col6" class="data row6 col6">42.40</td>
 </tr>
 </tbody>
 </table>
 </div>
 </div>
 <p>Table 1 gives us direct insight into the statistical scale and variability of each daily measure modeled. In particular, it highlights the spread in delay burden (comparing median <code>bus_delay_events</code> and <code>total_min_delay</code> against outliers located at the <code>max</code>), while also showing the volatile daily variance of our weighted driver activity proxy.</p>
-<div id="84278122" class="cell" data-execution_count="3">
+<div id="132caa5e" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="final_files/figure-html/cell-4-output-1.png" width="1175" height="518" class="figure-img"></p>
-<figcaption>Daily total TTC bus delay minutes across 2024, with a 7-day moving average.</figcaption>
+<figcaption>Daily total TTC bus delay minutes across 2024, with a 7 day moving average.</figcaption>
 </figure>
 </div>
 </div>
 </div>
-<p>The daily series shows substantial volatility throughout the year, with repeated short-lived spikes rather than a single isolated disruption period. This supports treating TTC delay burden as a highly variable outcome even before route-level modeling.</p>
+<p>The daily series shows substantial volatility throughout the year, with repeated short lived spikes rather than a single isolated disruption period. This supports treating TTC delay burden as a highly variable outcome even before route level modeling.</p>
 </section>
 </section>
 <section id="results" class="level1">
 <h1>Results</h1>
 <section id="classification-random-forest" class="level2">
 <h2 class="anchored" data-anchor-id="classification-random-forest">Classification: Random Forest</h2>
-<p><strong>Model Description:</strong> We deploy a Random Forest Classifier to identify high-delay route-days. A Random Forest is an ensemble learning method that constructs a multitude of decision trees and outputs the mode of the classes, effectively capturing complex, non-linear relationships between independent features (weather, traffic volume proxy, route) and the delay likelihood.</p>
+<p><strong>Model Description:</strong> We deploy a Random Forest Classifier to identify high-delay route-days. A Random Forest is an ensemble learning method that constructs a multitude of decision trees and outputs the mode of the classes, effectively capturing complex, nonlinear relationships between independent features (weather, traffic volume proxy, route) and the delay likelihood.</p>
 <p><strong>Data Split Strategy:</strong> The route-day dataset is partitioned into an 80% training set and a 20% test set (<code>test_size=0.2</code>). We utilize stratified sampling (<code>stratify=y</code>) based on the binary <code>high_delay</code> target to ensure proportional representation of severe delays across both sets, keeping a fixed random state for reproducibility. No separate validation set is used for this baseline implementation.</p>
 <p><strong>Hyperparameters:</strong> The model is initialized with <code>n_estimators=100</code> (building 100 individual decision trees) while locking the random state. All other hyperparameters are left at scikit-learn defaults (e.g., Gini impurity criterion, unbounded max depth).</p>
-<p><strong>Test Statistics:</strong> The model is evaluated on the 20% holdout test set utilizing overall Accuracy, along with weighted Precision, Recall, and F1-Score metrics to account for class imbalances when evaluating the model’s exactness and completeness.</p>
+<p><strong>Test Statistics:</strong> The model is evaluated on the 20% holdout test set utilizing overall Accuracy, along with weighted Precision, Recall, and F1 Score metrics to account for class imbalances when evaluating the model’s exactness and completeness.</p>
 </section>
 <section id="regression-ols-baseline-and-xgboost" class="level2">
 <h2 class="anchored" data-anchor-id="regression-ols-baseline-and-xgboost">Regression: OLS Baseline and XGBoost</h2>
@@ -255,7 +255,7 @@ window.Quarto = {
 <section id="ordinary-least-squares-ols-baseline" class="level3">
 <h3 class="anchored" data-anchor-id="ordinary-least-squares-ols-baseline">1. Ordinary Least Squares (OLS) Baseline</h3>
 <ul>
-<li><strong>Model Description:</strong> A foundational multiple linear regression model that maps the direct linear combination of inputs to continuous route-day delays. It serves as a highly interpretable naive baseline providing analytical <span class="math inline">\(p\)</span>-values and coefficient estimates.</li>
+<li><strong>Model Description:</strong> A foundational multiple linear regression model that maps the direct linear combination of inputs to continuous route-day delays. It serves as a highly interpretable naive baseline providing analytical <span class="math inline">\(p\)</span> values and coefficient estimates.</li>
 <li><strong>Hyperparameters:</strong> None. The model fits optimal coefficients to minimize the residual sum of squares. An intercept constant is added analytically before training via <code>sm.add_constant</code>.</li>
 <li><strong>Test Statistics:</strong> Evaluated utilizing Mean Squared Error (MSE) and Mean Absolute Error (MAE) measured against the 20% holdout test set.</li>
 </ul>
@@ -263,7 +263,7 @@ window.Quarto = {
 <section id="xgboost-regressor" class="level3">
 <h3 class="anchored" data-anchor-id="xgboost-regressor">2. XGBoost Regressor</h3>
 <ul>
-<li><strong>Model Description:</strong> Extreme Gradient Boosting sequentially builds decision trees designed to correct the residual error margins of its preceding trees. It is robust to outliers and well-equipped for modeling the highly right-skewed tail distributions prevalent in our continuous delay targets without requiring normalization.</li>
+<li><strong>Model Description:</strong> Extreme Gradient Boosting sequentially builds decision trees designed to correct the residual error margins of its preceding trees. It is robust to outliers and well equipped for modeling the highly right skewed tail distributions prevalent in our continuous delay targets without requiring normalization.</li>
 <li><strong>Hyperparameters:</strong> Configured with <code>n_estimators=100</code> (100 boosting rounds/trees) and <code>learning_rate=0.1</code> (step size shrinkage) to prevent overfitting, anchored strictly to a fixed random state.</li>
 <li><strong>Test Statistics:</strong> Analyzed identically via test MSE and MAE to formally benchmark predictive performance uplift versus the linear parametric equation mapping context.</li>
 </ul>
@@ -332,7 +332,7 @@ window.Quarto = {
 </tr>
 </tbody>
 </table>
-<div id="e7dd5388" class="cell" data-execution_count="4">
+<div id="f3320914" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -343,7 +343,7 @@ window.Quarto = {
 </div>
 </div>
 <p>The Random Forest achieved moderate overall performance but struggled on the class of greatest interest: only 24.4% of high-delay route-days were correctly identified. The confusion matrix shows 372 true positives against 1153 false negatives, so most severe route-day delays were still missed. For continuous prediction, XGBoost slightly outperformed OLS, but both models still had sizeable errors, with MAE around 36–37 minutes.</p>
-<div id="1d540842" class="cell" data-execution_count="5">
+<div id="84cbc28b" class="cell" data-execution_count="5">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -358,57 +358,57 @@ window.Quarto = {
 </section>
 <section id="selected-ols-coefficients" class="level2">
 <h2 class="anchored" data-anchor-id="selected-ols-coefficients">Selected OLS coefficients</h2>
-<div id="93ff9733" class="cell" data-execution_count="6">
-<div class="cell-output cell-output-display" data-execution_count="20">
+<div id="e8e92a59" class="cell" data-execution_count="6">
+<div class="cell-output cell-output-display" data-execution_count="6">
 <style type="text/css">
 </style>
 
-<table id="T_5f3a2" class="caption-top table table-sm table-striped small">
+<table id="T_baa2c" class="caption-top table table-sm table-striped small">
 <thead>
 <tr class="header">
-<th id="T_5f3a2_level0_col0" class="col_heading level0 col0" data-quarto-table-cell-role="th">Variable</th>
-<th id="T_5f3a2_level0_col1" class="col_heading level0 col1" data-quarto-table-cell-role="th">coef</th>
-<th id="T_5f3a2_level0_col2" class="col_heading level0 col2" data-quarto-table-cell-role="th">std_err</th>
-<th id="T_5f3a2_level0_col3" class="col_heading level0 col3" data-quarto-table-cell-role="th">p_value</th>
+<th id="T_baa2c_level0_col0" class="col_heading level0 col0" data-quarto-table-cell-role="th">Variable</th>
+<th id="T_baa2c_level0_col1" class="col_heading level0 col1" data-quarto-table-cell-role="th">coef</th>
+<th id="T_baa2c_level0_col2" class="col_heading level0 col2" data-quarto-table-cell-role="th">std_err</th>
+<th id="T_baa2c_level0_col3" class="col_heading level0 col3" data-quarto-table-cell-role="th">p_value</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td id="T_5f3a2_row0_col0" class="data row0 col0">temperature_2m_max</td>
-<td id="T_5f3a2_row0_col1" class="data row0 col1">0.036</td>
-<td id="T_5f3a2_row0_col2" class="data row0 col2">0.062</td>
-<td id="T_5f3a2_row0_col3" class="data row0 col3">0.5563</td>
+<td id="T_baa2c_row0_col0" class="data row0 col0">temperature_2m_max</td>
+<td id="T_baa2c_row0_col1" class="data row0 col1">0.036</td>
+<td id="T_baa2c_row0_col2" class="data row0 col2">0.062</td>
+<td id="T_baa2c_row0_col3" class="data row0 col3">0.5563</td>
 </tr>
 <tr class="even">
-<td id="T_5f3a2_row1_col0" class="data row1 col0">precipitation_sum</td>
-<td id="T_5f3a2_row1_col1" class="data row1 col1">-0.018</td>
-<td id="T_5f3a2_row1_col2" class="data row1 col2">0.102</td>
-<td id="T_5f3a2_row1_col3" class="data row1 col3">0.8604</td>
+<td id="T_baa2c_row1_col0" class="data row1 col0">precipitation_sum</td>
+<td id="T_baa2c_row1_col1" class="data row1 col1">-0.018</td>
+<td id="T_baa2c_row1_col2" class="data row1 col2">0.102</td>
+<td id="T_baa2c_row1_col3" class="data row1 col3">0.8604</td>
 </tr>
 <tr class="odd">
-<td id="T_5f3a2_row2_col0" class="data row2 col0">snowfall_sum</td>
-<td id="T_5f3a2_row2_col1" class="data row2 col1">3.423</td>
-<td id="T_5f3a2_row2_col2" class="data row2 col2">0.762</td>
-<td id="T_5f3a2_row2_col3" class="data row2 col3">0.0000</td>
+<td id="T_baa2c_row2_col0" class="data row2 col0">snowfall_sum</td>
+<td id="T_baa2c_row2_col1" class="data row2 col1">3.423</td>
+<td id="T_baa2c_row2_col2" class="data row2 col2">0.762</td>
+<td id="T_baa2c_row2_col3" class="data row2 col3">0.0000</td>
 </tr>
 <tr class="even">
-<td id="T_5f3a2_row3_col0" class="data row3 col0">windspeed_10m_max</td>
-<td id="T_5f3a2_row3_col1" class="data row3 col1">0.267</td>
-<td id="T_5f3a2_row3_col2" class="data row3 col2">0.091</td>
-<td id="T_5f3a2_row3_col3" class="data row3 col3">0.0033</td>
+<td id="T_baa2c_row3_col0" class="data row3 col0">windspeed_10m_max</td>
+<td id="T_baa2c_row3_col1" class="data row3 col1">0.267</td>
+<td id="T_baa2c_row3_col2" class="data row3 col2">0.091</td>
+<td id="T_baa2c_row3_col3" class="data row3 col3">0.0033</td>
 </tr>
 <tr class="odd">
-<td id="T_5f3a2_row4_col0" class="data row4 col0">tickets_issued</td>
-<td id="T_5f3a2_row4_col1" class="data row4 col1">0.001</td>
-<td id="T_5f3a2_row4_col2" class="data row4 col2">0.000</td>
-<td id="T_5f3a2_row4_col3" class="data row4 col3">0.0027</td>
+<td id="T_baa2c_row4_col0" class="data row4 col0">tickets_issued</td>
+<td id="T_baa2c_row4_col1" class="data row4 col1">0.001</td>
+<td id="T_baa2c_row4_col2" class="data row4 col2">0.000</td>
+<td id="T_baa2c_row4_col3" class="data row4 col3">0.0027</td>
 </tr>
 </tbody>
 </table>
 </div>
 </div>
-<p>The OLS model provides some inferential support for the project hypotheses. Snowfall, higher windspeed, and greater ticket volume all have positive coefficients with p-values below 0.01, while temperature and precipitation are not statistically significant in this linear specification.</p>
-<div id="19551350" class="cell" data-execution_count="7">
+<p>The OLS model provides some inferential support for the project hypotheses. Snowfall, higher windspeed, and greater ticket volume all have positive coefficients with p values below 0.01, while temperature and precipitation are not statistically significant in this linear specification.</p>
+<div id="d419a4d2" class="cell" data-execution_count="7">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -430,10 +430,10 @@ window.Quarto = {
 </section>
 <section id="model-limitations" class="level2">
 <h2 class="anchored" data-anchor-id="model-limitations">Model Limitations</h2>
-<p>Despite validating these directional relationships, forecasting exact delay parameters proved difficult, as evidenced by large margin errors (MAE around 36 minutes) and a low positive-class Recall rate (~25%) in predicting extreme delays. This outcome highlights critical limitations within our current methodology:</p>
+<p>Despite validating these directional relationships, forecasting exact delay parameters proved difficult, as evidenced by large margin errors (MAE around 36 minutes) and a low positive class Recall rate (~25%) in predicting extreme delays. This outcome highlights critical limitations within our current methodology:</p>
 <ol type="1">
-<li><strong>Resolution Mismatch:</strong> Our weather statistics operate on a broad, city-wide resolution (retrieved for central Toronto coordinates), yet bus delays and weather events (like localized squalls or icy hills) operate on highly localized spatial levels.</li>
-<li><strong>Imperfect Proxies:</strong> While daily parking ticket volume provides a clever proxy for overall driver presence and law enforcement activity, it is not a one-to-one mapping for real-time vehicular traffic density or localized congestion along specific bus corridors. 3. <strong>Omitted Operational Variables:</strong> The models lack access to internal TTC operational data. Critical unobserved factors—such as localized road construction, sudden mechanical bus failures, operator absenteeism, and scheduled route frequencies—are likely generating the massive residual variance our models struggle to capture.</li>
+<li><strong>Resolution Mismatch:</strong> Our weather statistics operate on a broad, citywide resolution (retrieved for central Toronto coordinates), yet bus delays and weather events (like localized squalls or icy hills) operate on highly localized spatial levels.</li>
+<li><strong>Imperfect Proxies:</strong> While daily parking ticket volume provides a clever proxy for overall driver presence and law enforcement activity, it is not a one to one mapping for realtime vehicular traffic density or localized congestion along specific bus corridors. 3. <strong>Omitted Operational Variables:</strong> The models lack access to internal TTC operational data. Critical unobserved factors, such as localized road construction, sudden mechanical bus failures, operator absenteeism, and scheduled route frequencies, are likely generating the massive residual variance our models struggle to capture.</li>
 </ol>
 <p>Ultimately, while macro variables like a snowstorm or general citywide traffic volume clearly shift the baseline probability of systemic delays, accurately predicting the exact minutes lost requires a more localized, granular operational dataset.</p>
 </section>
