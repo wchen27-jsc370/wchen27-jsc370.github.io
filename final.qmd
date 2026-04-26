@@ -1,0 +1,400 @@
+---
+title: "JSC370 Final Project - TTC Bus Delays"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    code-overflow: wrap
+  pdf:
+    toc: false
+---
+
+Repository: `https://github.com/wchen27-jsc370/wchen27-jsc370.github.io`
+
+Interactive dashboard: [`interactive_visualizations`](interactive_visualizations.html)
+
+Final Report: [`final.pdf`](final.pdf)
+
+# Introduction
+
+As a student who used to rely on the TTC daily for commuting, I was always frustrated by the unpredictability of service delays. If I had to be somewhere at a certain time, I would often find myself walking or biking there instead of relying on the TTC buses. This led me to wonder: why do TTC buses seem so unpredictably unreliable? Are there specific factors that contribute to bus delays, and can we predict when they are more likely to occur?
+
+
+**Research question.** How well can weather and traffic conditions predict severe TTC bus delays in Toronto during 2024, and which predictors are most important?
+
+
+```{python}
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import requests
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from xgboost import XGBRegressor
+
+plt.rcParams["figure.dpi"] = 140
+plt.rcParams["savefig.dpi"] = 140
+
+data_dir = Path("data")
+ttc_path = data_dir / "ttc-bus-delay-data-2024.csv"
+parking_paths = sorted(data_dir.glob("Parking_Tags_Data_2024_*.csv"))
+
+ttc_raw = pd.read_csv(ttc_path)
+parking_raw = pd.concat((pd.read_csv(p) for p in parking_paths), ignore_index=True)
+
+# TTC daily data
+
+ttc_clean = ttc_raw.rename(columns=lambda c: c.strip().lower().replace(" ", "_"))
+ttc_clean["date"] = pd.to_datetime(ttc_clean["date"], format="%d-%b-%y", errors="coerce")
+ttc_clean["min_delay"] = pd.to_numeric(ttc_clean["min_delay"], errors="coerce")
+ttc_clean = ttc_clean.dropna(subset=["date", "min_delay"])
+ttc_clean = ttc_clean[ttc_clean["date"].dt.year == 2024].copy()
+
+ttc_daily = (
+    ttc_clean.groupby("date", as_index=False)
+    .agg(
+        bus_delay_events=("route", "size"),
+        total_min_delay=("min_delay", "sum")
+    )
+)
+ttc_daily["delay_7d_ma"] = ttc_daily["total_min_delay"].rolling(7, min_periods=3).mean()
+
+# Weather API
+weather_url = (
+    "https://archive-api.open-meteo.com/v1/archive"
+    "?latitude=43.6548&longitude=-79.3884"
+    "&start_date=2024-01-01&end_date=2024-12-31"
+    "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,windspeed_10m_max"
+    "&timezone=America%2FToronto"
+)
+weather_json = requests.get(weather_url, timeout=30).json()
+weather_daily = pd.DataFrame(weather_json["daily"]).rename(columns={"time": "date"})
+weather_daily["date"] = pd.to_datetime(weather_daily["date"], errors="coerce")
+for col in [
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "precipitation_sum",
+    "snowfall_sum",
+    "windspeed_10m_max",
+]:
+    weather_daily[col] = pd.to_numeric(weather_daily[col], errors="coerce")
+weather_daily = weather_daily.dropna(subset=["date"]).sort_values("date")
+
+# Parking daily data
+parking_clean = parking_raw.rename(columns=lambda c: c.strip().lower())
+parking_clean["date"] = pd.to_datetime(
+    parking_clean["date_of_infraction"].astype(str), format="%Y%m%d", errors="coerce"
+)
+parking_clean["set_fine_amount"] = pd.to_numeric(parking_clean["set_fine_amount"], errors="coerce")
+parking_clean = parking_clean.dropna(subset=["date"])
+parking_clean = parking_clean[parking_clean["date"].dt.year == 2024].copy()
+
+parking_daily = (
+    parking_clean.groupby("date", as_index=False)
+    .agg(
+        tickets_issued=("date_of_infraction", "size"),
+        unique_infraction_types=("infraction_code", "nunique")
+    )
+)
+parking_daily["tickets_log1p"] = np.log1p(parking_daily["tickets_issued"])
+
+def zscore(series: pd.Series) -> pd.Series:
+    sd = series.std(ddof=0)
+    if pd.isna(sd) or sd == 0:
+        return pd.Series(0.0, index=series.index)
+    return (series - series.mean()) / sd
+
+parking_daily["driver_activity_proxy"] = (
+    0.7 * zscore(parking_daily["tickets_log1p"]) +
+    0.3 * zscore(parking_daily["unique_infraction_types"])
+)
+
+analysis_daily = (
+    ttc_daily.merge(parking_daily, on="date", how="left")
+    .merge(weather_daily, on="date", how="left")
+    .sort_values("date")
+)
+for col in ["tickets_issued", "unique_infraction_types", "tickets_log1p", "driver_activity_proxy"]:
+    analysis_daily[col] = analysis_daily[col].fillna(0)
+
+summary_vars = [
+    "bus_delay_events",
+    "total_min_delay",
+    "tickets_issued",
+    "driver_activity_proxy",
+    "precipitation_sum",
+    "snowfall_sum",
+    "windspeed_10m_max",
+]
+summary_table = (
+    analysis_daily[summary_vars]
+    .agg(["count", "mean", "std", "min", "median", "max"])
+    .T.reset_index()
+    .rename(columns={"index": "Variable", "std": "SD"})
+)
+
+# Route-day modeling data
+route_day_df = (
+    ttc_clean.groupby(["date", "route"], as_index=False)
+    .agg(total_delay_mins=("min_delay", "sum"), delay_events=("min_delay", "count"))
+)
+model_df = (
+    route_day_df
+    .merge(weather_daily, on="date", how="left")
+    .merge(parking_daily, on="date", how="left")
+).dropna()
+threshold_75 = model_df["total_delay_mins"].quantile(0.75)
+model_df["high_delay"] = (model_df["total_delay_mins"] >= threshold_75).astype(int)
+model_df["route_code"] = model_df["route"].astype("category").cat.codes
+
+features = [
+    "route_code",
+    "temperature_2m_max",
+    "precipitation_sum",
+    "snowfall_sum",
+    "windspeed_10m_max",
+    "tickets_issued",
+]
+X = model_df[features]
+y = model_df["high_delay"]
+y_reg = model_df["total_delay_mins"]
+
+n_ttc_rows = len(ttc_raw)
+n_parking_rows = len(parking_raw)
+n_parking_files = len(parking_paths)
+n_days = len(analysis_daily)
+n_route_days = len(model_df)
+n_routes = model_df["route"].nunique()
+high_delay_rate = model_df["high_delay"].mean()
+
+# Classification
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=370, stratify=y
+)
+rf_clf = RandomForestClassifier(n_estimators=100, random_state=370)
+rf_clf.fit(X_train, y_train)
+y_pred_class = rf_clf.predict(X_test)
+rf_acc = accuracy_score(y_test, y_pred_class)
+precision_w, recall_w, f1_w, _ = precision_recall_fscore_support(
+    y_test, y_pred_class, average="weighted"
+)
+pos_precision, pos_recall, pos_f1, _ = precision_recall_fscore_support(
+    y_test, y_pred_class, average="binary"
+)
+cm = confusion_matrix(y_test, y_pred_class)
+
+tn, fp, fn, tp = cm.ravel()
+
+# Regression
+X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
+    X, y_reg, test_size=0.2, random_state=370
+)
+X_train_ols = sm.add_constant(X_train_reg)
+X_test_ols = sm.add_constant(X_test_reg)
+ols_model = sm.OLS(y_train_reg, X_train_ols).fit()
+ols_preds = ols_model.predict(X_test_ols)
+ols_mse = mean_squared_error(y_test_reg, ols_preds)
+ols_mae = mean_absolute_error(y_test_reg, ols_preds)
+
+xgb_reg = XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=370)
+xgb_reg.fit(X_train_reg, y_train_reg)
+xgb_preds = xgb_reg.predict(X_test_reg)
+xgb_mse = mean_squared_error(y_test_reg, xgb_preds)
+xgb_mae = mean_absolute_error(y_test_reg, xgb_preds)
+
+coef_table = pd.DataFrame({
+    "Variable": ols_model.params.index,
+    "coef": ols_model.params.values,
+    "std_err": ols_model.bse.values,
+    "p_value": ols_model.pvalues.values,
+})
+coef_table = coef_table[coef_table["Variable"] != "const"].copy()
+coef_table = coef_table[coef_table["Variable"].isin([
+    "snowfall_sum", "windspeed_10m_max", "tickets_issued", "temperature_2m_max", "precipitation_sum"
+])]
+
+importance_df = pd.DataFrame({
+    "Feature": features,
+    "RF_Importance": rf_clf.feature_importances_,
+    "XGB_Importance": xgb_reg.feature_importances_,
+})
+```
+
+# Methods
+
+The analysis uses three sources: TTC bus delay records, City of Toronto parking ticket records, and daily Toronto weather from the Open-Meteo Archive API. The raw inputs contain `{python} int(n_ttc_rows)` TTC delay records and `{python} int(n_parking_rows)` parking records drawn from `{python} int(n_parking_files)` parking files. Parking tickets are used as a proxy for citywide street activity rather than a direct measure of congestion.
+
+TTC incidents were cleaned by standardizing column names, parsing dates, coercing delay minutes to numeric, and restricting the data to 2024. Parking tickets were aggregated to daily ticket counts. I combined these daily ticket measures into a driver activity proxy using a weighted standardized average of log ticket volume and infraction diversity. Weather data were requested for Toronto coordinates and reduced to daily temperature, precipitation, snowfall, and windspeed measures.
+
+These sources were first merged into a daily table with `{python} int(n_days)` days for descriptive analysis. For prediction, TTC incidents were then aggregated to a **route-day** panel with `{python} int(n_route_days)` rows across `{python} int(n_routes)` routes. A route-day was labeled **high delay** if total delay minutes were in the top quartile of the route-day distribution, giving a positive-class rate of `{python} f"{100 * high_delay_rate:.1f}%"`. Because the route-day panel is built from recorded delay incidents, it does not include zero-delay route-days.
+
+I fit three baseline models using an 80/20 train-test split: a Random Forest classifier for the binary high-delay outcome, an OLS regression for continuous delay minutes, and an XGBoost regressor for nonlinear prediction. The classifier used `n_estimators = 100`; XGBoost used `n_estimators = 100` and `learning_rate = 0.1`. Evaluation metrics were accuracy, weighted precision/recall/F1, positive-class precision/recall/F1, mean squared error, and mean absolute error. Interactive Plotly visualizations are provided on the website rather than in the PDF.
+
+## Table 1. Descriptive statistics for daily TTC, parking, and weather measures
+
+```{python}
+summary_table.style.format(
+    {
+        "count": "{:,.0f}",
+        "mean": "{:,.2f}",
+        "SD": "{:,.2f}",
+        "min": "{:,.2f}",
+        "median": "{:,.2f}",
+        "max": "{:,.2f}",
+    }
+).hide(axis="index")
+```
+
+Table 1 gives us direct insight into the statistical scale and variability of each daily measure modeled. In particular, it highlights the spread in delay burden (comparing median `bus_delay_events` and `total_min_delay` against outliers located at the `max`), while also showing the volatile daily variance of our weighted driver activity proxy.
+
+```{python}
+#| fig-cap: "Daily total TTC bus delay minutes across 2024, with a 7-day moving average."
+fig, ax = plt.subplots(figsize=(8.5, 3.8))
+ax.plot(ttc_daily["date"], ttc_daily["total_min_delay"], alpha=0.35, label="Daily")
+ax.plot(ttc_daily["date"], ttc_daily["delay_7d_ma"], linewidth=2, label="7-day moving average")
+ax.set_xlabel("Date")
+ax.set_ylabel("Total delay minutes")
+ax.legend(frameon=False)
+plt.tight_layout()
+plt.show()
+```
+
+The daily series shows substantial volatility throughout the year, with repeated short-lived spikes rather than a single isolated disruption period. This supports treating TTC delay burden as a highly variable outcome even before route-level modeling.
+
+# Results
+## Classification: Random Forest
+
+**Model Description:** We deploy a Random Forest Classifier to identify high-delay route-days. A Random Forest is an ensemble learning method that constructs a multitude of decision trees and outputs the mode of the classes, effectively capturing complex, non-linear relationships between independent features (weather, traffic volume proxy, route) and the delay likelihood.
+
+**Data Split Strategy:** The route-day dataset is partitioned into an 80% training set and a 20% test set (`test_size=0.2`). We utilize stratified sampling (`stratify=y`) based on the binary `high_delay` target to ensure proportional representation of severe delays across both sets, keeping a fixed random state for reproducibility. No separate validation set is used for this baseline implementation.
+
+**Hyperparameters:** The model is initialized with `n_estimators=100` (building 100 individual decision trees) while locking the random state. All other hyperparameters are left at scikit-learn defaults (e.g., Gini impurity criterion, unbounded max depth).
+
+**Test Statistics:** The model is evaluated on the 20% holdout test set utilizing overall Accuracy, along with weighted Precision, Recall, and F1-Score metrics to account for class imbalances when evaluating the model's exactness and completeness.
+
+## Regression: OLS Baseline and XGBoost
+
+We pivot to regression approaches to directly forecast the exact continuous duration of daily delay minutes per route. Both algorithms employ an 80% training and 20% holdout test set split randomly (`test_size=0.2, random_state=370`). Stratification is not applied here since the target (`total_delay_mins`) is continuous.
+
+### 1. Ordinary Least Squares (OLS) Baseline
+*   **Model Description:** A foundational multiple linear regression model that maps the direct linear combination of inputs to continuous route-day delays. It serves as a highly interpretable naive baseline providing analytical $p$-values and coefficient estimates.
+*   **Hyperparameters:** None. The model fits optimal coefficients to minimize the residual sum of squares. An intercept constant is added analytically before training via `sm.add_constant`.
+*   **Test Statistics:** Evaluated utilizing Mean Squared Error (MSE) and Mean Absolute Error (MAE) measured against the 20% holdout test set.
+
+### 2. XGBoost Regressor
+*   **Model Description:** Extreme Gradient Boosting sequentially builds decision trees designed to correct the residual error margins of its preceding trees. It is robust to outliers and well-equipped for modeling the highly right-skewed tail distributions prevalent in our continuous delay targets without requiring normalization.
+*   **Hyperparameters:** Configured with `n_estimators=100` (100 boosting rounds/trees) and `learning_rate=0.1` (step size shrinkage) to prevent overfitting, anchored strictly to a fixed random state. 
+*   **Test Statistics:** Analyzed identically via test MSE and MAE to formally benchmark predictive performance uplift versus the linear parametric equation mapping context.
+
+
+### Classification: Random Forest
+
+| Metric | Score |
+|---|---:|
+| Accuracy | `{python} f"{rf_acc:.3f}"` |
+| Weighted Precision | `{python} f"{precision_w:.3f}"` |
+| Weighted Recall | `{python} f"{recall_w:.3f}"` |
+| Weighted F1 | `{python} f"{f1_w:.3f}"` |
+| Positive-class Precision | `{python} f"{pos_precision:.3f}"` |
+| Positive-class Recall | `{python} f"{pos_recall:.3f}"` |
+| Positive-class F1 | `{python} f"{pos_f1:.3f}"` |
+
+### Regression
+
+| Model | MSE | MAE |
+|---|---:|---:|
+| OLS baseline | `{python} f"{ols_mse:.2f}"` | `{python} f"{ols_mae:.2f}"` |
+| XGBoost regressor | `{python} f"{xgb_mse:.2f}"` | `{python} f"{xgb_mae:.2f}"` |
+
+```{python}
+#| fig-cap: "Confusion matrix for the Random Forest classifier on the holdout test set."
+fig, ax = plt.subplots(figsize=(4, 3))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
+ax.set_xlabel("Predicted")
+ax.set_ylabel("Actual")
+plt.tight_layout()
+plt.show()
+```
+
+The Random Forest achieved moderate overall performance but struggled on the class of greatest interest: only `{python} f"{100 * pos_recall:.1f}%"` of high-delay route-days were correctly identified. The confusion matrix shows `{python} int(tp)` true positives against `{python} int(fn)` false negatives, so most severe route-day delays were still missed. For continuous prediction, XGBoost slightly outperformed OLS, but both models still had sizeable errors, with MAE around 36–37 minutes.
+
+```{python}
+#| fig-cap: "Actual versus predicted route-day delay minutes for the OLS and XGBoost regression models."
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.8), sharey=True)
+
+axes[0].scatter(y_test_reg, ols_preds, alpha=0.25, s=10)
+axes[0].plot([y_test_reg.min(), y_test_reg.max()], [y_test_reg.min(), y_test_reg.max()], "k--", lw=1.5)
+axes[0].set_title("OLS")
+axes[0].set_xlabel("Actual delay (mins)")
+axes[0].set_ylabel("Predicted delay (mins)")
+
+axes[1].scatter(y_test_reg, xgb_preds, alpha=0.25, s=10)
+axes[1].plot([y_test_reg.min(), y_test_reg.max()], [y_test_reg.min(), y_test_reg.max()], "k--", lw=1.5)
+axes[1].set_title("XGBoost")
+axes[1].set_xlabel("Actual delay (mins)")
+
+plt.tight_layout()
+plt.show()
+```
+
+The regression scatterplots show that both models predict moderate delays more accurately than the largest outliers. XGBoost is somewhat better at following variation away from zero, but neither model comes close to capturing the most extreme delay days.
+
+## Selected OLS coefficients
+
+```{python}
+coef_table.style.format({"coef": "{:.3f}", "std_err": "{:.3f}", "p_value": "{:.4f}"}).hide(axis="index")
+```
+
+The OLS model provides some inferential support for the project hypotheses. Snowfall, higher windspeed, and greater ticket volume all have positive coefficients with p-values below 0.01, while temperature and precipitation are not statistically significant in this linear specification.
+
+```{python}
+#| fig-cap: "Feature importance from the Random Forest classifier and XGBoost regressor."
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.8))
+
+sns.barplot(
+    data=importance_df.sort_values("RF_Importance", ascending=False),
+    x="RF_Importance", y="Feature", ax=axes[0], color="#4C78A8"
+)
+axes[0].set_title("Random Forest")
+axes[0].set_xlabel("Importance")
+axes[0].set_ylabel("")
+
+sns.barplot(
+    data=importance_df.sort_values("XGB_Importance", ascending=False),
+    x="XGB_Importance", y="Feature", ax=axes[1], color="#F58518"
+)
+axes[1].set_title("XGBoost")
+axes[1].set_xlabel("Importance")
+axes[1].set_ylabel("")
+
+plt.tight_layout()
+plt.show()
+```
+
+Route identity dominated the Random Forest classifier, suggesting that persistent route-level differences explain much of the variation in severe delays. In the XGBoost regressor, snowfall was the most important single weather predictor, followed by temperature, precipitation, and ticket volume.
+
+# Conclusion
+
+## Big Picture Interpretations
+
+The core motivation of this project was determining to what extent day to day weather conditions and varying driver activity explain the frequency and severity of TTC bus delays across Toronto. The preliminary data exploration effectively established a baseline: delay distributions are extremely skewed, and severe delays disproportionately pile up on days afflicted by adverse weather. 
+
+When translated into predictive models, our empirical results support these initial hypotheses, but also reveal the nuanced complexity of urban transit networks. The regression frameworks indicate that specific weather perturbations, most notably **snowfall** and **wind speeds**, alongside our proxy measure for street level driver activity carry statistically significant correlations that drive delay severity upward. Our tree based XGBoost model specifically isolates extreme weather events like snowfall as the most structurally important feature for forecasting the exact magnitude of continuous delays. Together, this supports our initial intuition: traffic pressure and adverse weather jointly disrupt regular bus operations.
+
+## Model Limitations
+
+Despite validating these directional relationships, forecasting exact delay parameters proved difficult, as evidenced by large margin errors (MAE around 36 minutes) and a low positive-class Recall rate (~25%) in predicting extreme delays. This outcome highlights critical limitations within our current methodology:
+
+1. **Resolution Mismatch:** Our weather statistics operate on a broad, city-wide resolution (retrieved for central Toronto coordinates), yet bus delays and weather events (like localized squalls or icy hills) operate on highly localized spatial levels.
+2. **Imperfect Proxies:** While daily parking ticket volume provides a clever proxy for overall driver presence and law enforcement activity, it is not a one-to-one mapping for real-time vehicular traffic density or localized congestion along specific bus corridors.  3. **Omitted Operational Variables:** The models lack access to internal TTC operational data. Critical unobserved factors—such as localized road construction, sudden mechanical bus failures, operator absenteeism, and scheduled route frequencies—are likely generating the massive residual variance our models struggle to capture. 
+
+Ultimately, while macro variables like a snowstorm or general citywide traffic volume clearly shift the baseline probability of systemic delays, accurately predicting the exact minutes lost requires a more localized, granular operational dataset.

@@ -1,0 +1,288 @@
+---
+title: "Interactive Exploratory Data Analysis"
+execute:
+    echo: false
+format:
+    html:
+        toc: true
+        code-overflow: wrap
+        embed-resources: true
+---
+
+This document contains interactive visualizations for the TTC Bus Delay project. 
+
+```{python}
+#| summary: setup
+#| echo: false
+#| warning: false
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import requests
+import plotly.express as px
+import plotly.graph_objects as go
+
+data_dir = Path("data")
+ttc_path = data_dir / "ttc-bus-delay-data-2024.csv"
+parking_paths = sorted(data_dir.glob("Parking_Tags_Data_2024_*.csv"))
+
+ttc_raw = pd.read_csv(ttc_path)
+parking_raw = pd.concat((pd.read_csv(p) for p in parking_paths), ignore_index=True)
+
+ttc_clean = ttc_raw.rename(columns=lambda c: c.strip().lower().replace(" ", "_"))
+ttc_clean["date"] = pd.to_datetime(ttc_clean["date"], format="%d-%b-%y", errors="coerce")
+ttc_clean["min_delay"] = pd.to_numeric(ttc_clean["min_delay"], errors="coerce")
+ttc_clean = ttc_clean.dropna(subset=["date", "min_delay"])
+ttc_clean = ttc_clean[ttc_clean["date"].dt.year == 2024].copy()
+
+parking_clean = parking_raw.rename(columns=lambda c: c.strip().lower())
+parking_clean["date"] = pd.to_datetime(parking_clean["date_of_infraction"].astype(str), format="%Y%m%d", errors="coerce")
+parking_clean["set_fine_amount"] = pd.to_numeric(parking_clean["set_fine_amount"], errors="coerce")
+parking_clean = parking_clean.dropna(subset=["date"])
+parking_clean = parking_clean[parking_clean["date"].dt.year == 2024].copy()
+
+parking_daily = parking_clean.groupby("date", as_index=False).agg(
+    tickets_issued=("date_of_infraction", "size"),
+    unique_infraction_types=("infraction_code", "nunique"),
+)
+parking_daily["tickets_log1p"] = np.log1p(parking_daily["tickets_issued"])
+
+toronto_lat, toronto_lon = 43.6548, -79.3884
+weather_url = (
+    f"https://archive-api.open-meteo.com/v1/archive?latitude={toronto_lat}&longitude={toronto_lon}"
+    "&start_date=2024-01-01&end_date=2024-12-31"
+    "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,windspeed_10m_max&timezone=America%2FToronto"
+)
+weather_json = requests.get(weather_url, timeout=30).json()
+weather_daily = pd.DataFrame(weather_json["daily"]).rename(columns={"time": "date"})
+weather_daily["date"] = pd.to_datetime(weather_daily["date"], errors="coerce")
+weather_cols = ["temperature_2m_max", "temperature_2m_min", "precipitation_sum", "snowfall_sum", "windspeed_10m_max"]
+for col in weather_cols:
+    weather_daily[col] = pd.to_numeric(weather_daily[col], errors="coerce")
+
+route_day_df = ttc_clean.groupby(["date", "route"], as_index=False).agg(
+    total_delay_mins=("min_delay", "sum"),
+    delay_events=("min_delay", "count")
+)
+
+# Merge weather and parking proxy onto the route-day base
+model_df = (
+    route_day_df
+    .merge(weather_daily, on="date", how="left")
+    .merge(parking_daily, on="date", how="left")
+).dropna()
+```
+
+## Interactive Route-Day Heatmap
+
+This interactive heatmap allows us to visualize the density of delays across different bus routes over time. You can toggle between viewing the total minutes of delay and the sheer count of delay events.
+
+```{python}
+#| echo: false
+#| warning: false
+
+# Filter to top 30 routes for readability in the heatmap
+top_routes = model_df.groupby("route")["total_delay_mins"].sum().nlargest(30).index
+heatmap_df = model_df[model_df["route"].isin(top_routes)].copy()
+
+heatmap_df["route"] = heatmap_df["route"].astype(str)
+
+fig1 = px.density_heatmap(
+    heatmap_df,
+    x="date",
+    y="route",
+    z="total_delay_mins",
+    histfunc="sum",
+    color_continuous_scale="Viridis",
+    title="Top 30 Routes: Daily Delay Burden Heatmap",
+    labels={"date": "Date", "route": "Bus Route", "total_delay_mins": "Total Delay (mins)"}
+)
+
+fig1.update_layout(
+    updatemenus=[
+        dict(
+            type="buttons",
+            direction="right",
+            x=1.0,
+            y=1.15,
+            showactive=True,
+            buttons=list([
+                dict(
+                    label="Total Delay Minutes",
+                    method="update",
+                    args=[{"z": [heatmap_df["total_delay_mins"]]},
+                          {"title": "Top 30 Routes: Daily Delay Minutes Heatmap",
+                           "coloraxis.colorbar.title": "Minutes"}]
+                ),
+                dict(
+                    label="Delay Event Count",
+                    method="update",
+                    args=[{"z": [heatmap_df["delay_events"]]},
+                          {"title": "Top 30 Routes: Daily Delay Event Count Heatmap",
+                           "coloraxis.colorbar.title": "Events"}]
+                )
+            ]),
+        )
+    ]
+)
+fig1.show()
+```
+
+## Route Ranking Explorer
+
+This visualization dynamically ranks the TTC bus routes based on their cumulative delay metrics. Use the slider to filter the number of top routes displayed, and the dropdown to toggle between total minutes lost and the number of distinct delay events.
+
+```{python}
+#| echo: false
+#| warning: false
+
+# Aggregate route totals
+route_agg = model_df.groupby("route", as_index=False).agg(
+    total_mins=("total_delay_mins", "sum"),
+    total_events=("delay_events", "sum")
+)
+
+# Sort by minutes for initial view
+route_agg = route_agg.sort_values("total_mins", ascending=False).reset_index(drop=True)
+route_agg["route"] = route_agg["route"].astype(str)
+
+fig2 = go.Figure()
+
+fig2.add_trace(
+    go.Bar(
+        x=route_agg["route"],
+        y=route_agg["total_mins"],
+        marker_color="#4c78a8",
+        name="Total Minutes"
+    )
+)
+
+fig2.update_layout(
+    title="Interactive Route Delay Rankings",
+    xaxis_title="Bus Route",
+    yaxis_title="Metric Value",
+    updatemenus=[
+        dict(
+            type="dropdown",
+            direction="down",
+            x=0.1,
+            y=1.15,
+            showactive=True,
+            buttons=list([
+                dict(
+                    label="Total Delay Minutes",
+                    method="update",
+                    args=[{"y": [route_agg["total_mins"]]}, {"yaxis.title.text": "Total Delay (mins)"}]
+                ),
+                dict(
+                    label="Total Delay Events",
+                    method="update",
+                    args=[{"y": [route_agg["total_events"]]}, {"yaxis.title.text": "Total Events"}]
+                )
+            ]),
+        )
+    ]
+)
+
+# Create slider steps
+steps = []
+for i in range(10, min(100, len(route_agg)), 10):
+    step = dict(
+        method="update",
+        args=[{"x": [route_agg["route"].head(i)], "y": [route_agg["total_mins"].head(i)]}],
+        label=str(i)
+    )
+    steps.append(step)
+
+sliders = [dict(
+    active=0,
+    currentvalue={"prefix": "Show Top N Routes: "},
+    pad={"t": 50},
+    steps=steps
+)]
+
+fig2.update_layout(
+    sliders=sliders,
+    xaxis_tickangle=-45
+)
+
+# Initialize with top 10
+fig2.update_traces(x=route_agg["route"].head(10), y=route_agg["total_mins"].head(10))
+
+fig2.show()
+```
+
+## Weather vs. Delay Scatterplot Explorer
+
+To understand how environmental conditions impact bus operations, this scatterplot compares daily delays against dynamic weather variables. You can toggle the X-axis parameter to explore the specific relationships between extreme delays and temperature, precipitation, snowfall, or windspeed.
+
+```{python}
+#| echo: false
+#| warning: false
+
+daily_weather_impact = model_df.groupby("date", as_index=False).agg(
+    system_delay_mins=("total_delay_mins", "sum"),
+    system_delay_events=("delay_events", "sum"),
+    temperature_2m_max=("temperature_2m_max", "max"),
+    precipitation_sum=("precipitation_sum", "max"),
+    snowfall_sum=("snowfall_sum", "max"),
+    windspeed_10m_max=("windspeed_10m_max", "max")
+)
+
+fig3 = go.Figure()
+
+fig3.add_trace(
+    go.Scatter(
+        x=daily_weather_impact["temperature_2m_max"],
+        y=daily_weather_impact["system_delay_mins"],
+        mode="markers",
+        marker=dict(
+            size=10,
+            color=daily_weather_impact["system_delay_mins"],
+            colorscale="Inferno",
+            showscale=True,
+            colorbar=dict(title="System Delay (Mins)")
+        ),
+        text=daily_weather_impact["date"].astype(str),
+        hovertemplate="Date: %{text}<br>Weather: %{x}<br>System Delay: %{y} mins<extra></extra>"
+    )
+)
+
+fig3.update_layout(
+    title="System-wide Delay vs. Weather Conditions",
+    xaxis_title="Max Temperature (°C)",
+    yaxis_title="Total System Delay (minutes)",
+    updatemenus=[
+        dict(
+            active=0,
+            buttons=list([
+                dict(label="Max Temperature (°C)",
+                     method="update",
+                     args=[{"x": [daily_weather_impact["temperature_2m_max"]]},
+                           {"xaxis": {"title": "Max Temperature (°C)"}}]),
+                dict(label="Precipitation (mm)",
+                     method="update",
+                     args=[{"x": [daily_weather_impact["precipitation_sum"]]},
+                           {"xaxis": {"title": "Precipitation (mm)"}}]),
+                dict(label="Snowfall (cm)",
+                     method="update",
+                     args=[{"x": [daily_weather_impact["snowfall_sum"]]},
+                           {"xaxis": {"title": "Snowfall (cm)"}}]),
+                dict(label="Windspeed (km/h)",
+                     method="update",
+                     args=[{"x": [daily_weather_impact["windspeed_10m_max"]]},
+                           {"xaxis": {"title": "Windspeed (km/h)"}}]),
+            ]),
+            direction="down",
+            pad={"r": 10, "t": 10},
+            showactive=True,
+            x=0.2,
+            xanchor="left",
+            y=1.15,
+            yanchor="top"
+        ),
+    ]
+)
+
+fig3.show()
+```
